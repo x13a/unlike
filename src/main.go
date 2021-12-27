@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	Version = "0.1.0"
+	Version = "0.1.1"
 
-	DefaultDays    = 7
+	DefaultDays    = 30
 	DefaultTimeout = 30 * time.Second
 	RateLimitSleep = 15 * time.Minute
 
@@ -44,7 +44,10 @@ type Opts struct {
 
 func getOpts() *Opts {
 	isVersion := flag.Bool("V", false, "print version and exit")
-	opts := &Opts{}
+	opts := &Opts{
+		oauthToken:       os.Getenv(EnvOAuthToken),
+		oauthTokenSecret: os.Getenv(EnvOAuthTokenSecret),
+	}
 	flag.StringVar(&opts.username, "u", "", "username")
 	flag.IntVar(&opts.days, "d", DefaultDays, "days")
 	flag.DurationVar(&opts.timeout, "t", DefaultTimeout, "timeout")
@@ -53,6 +56,13 @@ func getOpts() *Opts {
 		fmt.Println(Version)
 		os.Exit(ExitSuccess)
 	}
+	if opts.oauthToken == "" || opts.oauthTokenSecret == "" {
+		fmt.Println("oauth token and oauth token secret are required")
+		os.Exit(ExitUsage)
+	}
+	os.Unsetenv(EnvOAuthToken)
+	os.Unsetenv(EnvOAuthTokenSecret)
+	// TODO: /2/users/me
 	if opts.username == "" {
 		fmt.Println("username is required")
 		os.Exit(ExitUsage)
@@ -60,14 +70,6 @@ func getOpts() *Opts {
 	if opts.days < 0 {
 		opts.days = DefaultDays
 	}
-	opts.oauthToken = os.Getenv(EnvOAuthToken)
-	opts.oauthTokenSecret = os.Getenv(EnvOAuthTokenSecret)
-	if opts.oauthToken == "" || opts.oauthTokenSecret == "" {
-		fmt.Println("oauth token and oauth token secret are required")
-		os.Exit(ExitUsage)
-	}
-	os.Unsetenv(EnvOAuthToken)
-	os.Unsetenv(EnvOAuthTokenSecret)
 	return opts
 }
 
@@ -144,8 +146,8 @@ func (t *Twitter) CollectLikedTweetsID(
 	[]string,
 	error,
 ) {
-	var token string
 	ids := []string{}
+	token := ""
 	for {
 		res, err := t.GetLikedTweets(ctx, userID, token)
 		if err != nil {
@@ -155,8 +157,9 @@ func (t *Twitter) CollectLikedTweetsID(
 				return nil, err
 			}
 		}
+		point := time.Now().AddDate(0, 0, -days)
 		for _, tweet := range res.Data {
-			if gotwi.TimeValue(tweet.CreatedAt).After(time.Now().AddDate(0, 0, -days)) {
+			if gotwi.TimeValue(tweet.CreatedAt).After(point) {
 				continue
 			}
 			tweetID := gotwi.StringValue(tweet.ID)
@@ -174,7 +177,7 @@ func (t *Twitter) CollectLikedTweetsID(
 }
 
 func (t *Twitter) DeleteLikes(ctx context.Context, userID string, ids []string) error {
-	var i int
+	i := 0
 	for i < len(ids) {
 		id := ids[i]
 		res, err := t.Unlike(ctx, userID, id)
@@ -216,7 +219,8 @@ func main() {
 	opts := getOpts()
 	twitter, err := NewTwitter(opts.oauthToken, opts.oauthTokenSecret, opts.timeout)
 	fatalOnError(err)
-	user, err := twitter.LookupUserByUsername(context.Background(), opts.username)
+	ctx := context.Background()
+	user, err := twitter.LookupUserByUsername(ctx, opts.username)
 	fatalOnError(err)
 	userID := gotwi.StringValue(user.Data.ID)
 	if userID == "" {
@@ -224,12 +228,13 @@ func main() {
 	}
 	log.Println("user id: ", userID)
 	log.Println("collecting liked tweets id...")
-	ids, err := twitter.CollectLikedTweetsID(context.Background(), userID, opts.days)
+	ids, err := twitter.CollectLikedTweetsID(ctx, userID, opts.days)
 	fatalOnError(err)
 	if len(ids) == 0 {
-		fmt.Println("no liked tweets")
+		log.Println("no liked tweets")
 		os.Exit(ExitSuccess)
 	}
-	log.Printf("%d tweets to delete\n", len(ids))
-	fatalOnError(twitter.DeleteLikes(context.Background(), userID, ids))
+	log.Printf("%d likes to delete\n", len(ids))
+	fatalOnError(twitter.DeleteLikes(ctx, userID, ids))
+	log.Println("done")
 }
