@@ -21,11 +21,11 @@ $ brew install x13a/tap/unlike
 Usage of unlike:
   -V	print version and exit
   -d int
-    	days (default 30)
+    	days to skip (default 30)
   -t duration
-    	timeout (default 30s)
+    	http timeout (default 30s)
   -u string
-    	username
+    	username (optional)
 ```
 
 ## Example

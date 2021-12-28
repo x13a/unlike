@@ -49,9 +49,9 @@ func getOpts() *Opts {
 		oauthToken:       os.Getenv(EnvOAuthToken),
 		oauthTokenSecret: os.Getenv(EnvOAuthTokenSecret),
 	}
-	flag.StringVar(&opts.username, "u", "", "username")
-	flag.IntVar(&opts.days, "d", DefaultDays, "days")
-	flag.DurationVar(&opts.timeout, "t", DefaultTimeout, "timeout")
+	flag.StringVar(&opts.username, "u", "", "username (optional)")
+	flag.IntVar(&opts.days, "d", DefaultDays, "days to skip")
+	flag.DurationVar(&opts.timeout, "t", DefaultTimeout, "http timeout")
 	flag.Parse()
 	if *isVersion {
 		fmt.Println(Version)
