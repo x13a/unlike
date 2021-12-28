@@ -13,6 +13,7 @@ import (
 
 	"github.com/michimani/gotwi"
 	"github.com/michimani/gotwi/fields"
+	"github.com/michimani/gotwi/resources"
 	"github.com/michimani/gotwi/tweets"
 	tweetsTypes "github.com/michimani/gotwi/tweets/types"
 	"github.com/michimani/gotwi/users"
@@ -20,7 +21,7 @@ import (
 )
 
 const (
-	Version = "0.1.1"
+	Version = "0.1.2"
 
 	DefaultDays    = 30
 	DefaultTimeout = 30 * time.Second
@@ -62,11 +63,6 @@ func getOpts() *Opts {
 	}
 	os.Unsetenv(EnvOAuthToken)
 	os.Unsetenv(EnvOAuthTokenSecret)
-	// TODO: /2/users/me
-	if opts.username == "" {
-		fmt.Println("username is required")
-		os.Exit(ExitUsage)
-	}
 	if opts.days < 0 {
 		opts.days = DefaultDays
 	}
@@ -91,14 +87,26 @@ func NewTwitter(oauthToken, oauthTokenSecret string, timeout time.Duration) (*Tw
 }
 
 func (t *Twitter) LookupUserByUsername(ctx context.Context, username string) (
-	*usersTypes.UserLookupByUsernameResponse,
+	resources.User,
 	error,
 ) {
-	return users.UserLookupByUsername(
+	res, err := users.UserLookupByUsername(
 		ctx,
 		t.client,
 		&usersTypes.UserLookupByUsernameParams{Username: username},
 	)
+	if err != nil {
+		return resources.User{}, err
+	}
+	return res.Data, nil
+}
+
+func (t *Twitter) LookupUserMe(ctx context.Context) (resources.User, error) {
+	res, err := users.UserLookupMe(ctx, t.client, &usersTypes.UserLookupMeParams{})
+	if err != nil {
+		return resources.User{}, err
+	}
+	return res.Data, nil
 }
 
 func (t *Twitter) GetLikedTweets(
@@ -153,9 +161,8 @@ func (t *Twitter) CollectLikedTweetsID(
 		if err != nil {
 			if trySleepOnError(err) {
 				continue
-			} else {
-				return nil, err
 			}
+			return nil, err
 		}
 		point := time.Now().AddDate(0, 0, -days)
 		for _, tweet := range res.Data {
@@ -178,35 +185,40 @@ func (t *Twitter) CollectLikedTweetsID(
 
 func (t *Twitter) DeleteLikes(ctx context.Context, userID string, ids []string) error {
 	i := 0
+	j := 0
 	for i < len(ids) {
 		id := ids[i]
 		res, err := t.Unlike(ctx, userID, id)
 		if err != nil {
 			if trySleepOnError(err) {
 				continue
-			} else {
-				log.Printf("failed to unlike tweet %s: %v\n", id, err)
 			}
+			log.Printf("failed to unlike tweet %s: %v\n", id, err)
 		} else if !res {
 			log.Println("unlike failed: ", id)
+		} else {
+			j++
 		}
 		i++
+		if i%100 == 0 {
+			log.Printf("[%d] %d/%d\n", j, i, len(ids))
+		}
 	}
 	return nil
 }
 
 func trySleepOnError(err error) bool {
+	rv := false
 	if err1, ok := err.(net.Error); ok && err1.Timeout() {
 		log.Printf("timeout: %v, sleep 30s\n", err1)
 		time.Sleep(DefaultTimeout)
-		return true
+		rv = true
 	} else if strings.Contains(err.Error(), "httpStatusCode=429") {
 		log.Printf("rate limit exceeded: %v, sleep 15m\n", err)
 		time.Sleep(RateLimitSleep)
-		return true
-	} else {
-		return false
+		rv = true
 	}
+	return rv
 }
 
 func fatalOnError(err error) {
@@ -220,9 +232,14 @@ func main() {
 	twitter, err := NewTwitter(opts.oauthToken, opts.oauthTokenSecret, opts.timeout)
 	fatalOnError(err)
 	ctx := context.Background()
-	user, err := twitter.LookupUserByUsername(ctx, opts.username)
+	var user resources.User
+	if opts.username != "" {
+		user, err = twitter.LookupUserByUsername(ctx, opts.username)
+	} else {
+		user, err = twitter.LookupUserMe(ctx)
+	}
 	fatalOnError(err)
-	userID := gotwi.StringValue(user.Data.ID)
+	userID := gotwi.StringValue(user.ID)
 	if userID == "" {
 		panic("user id is empty")
 	}
@@ -231,7 +248,7 @@ func main() {
 	ids, err := twitter.CollectLikedTweetsID(ctx, userID, opts.days)
 	fatalOnError(err)
 	if len(ids) == 0 {
-		log.Println("no liked tweets")
+		log.Println("liked tweets not found")
 		os.Exit(ExitSuccess)
 	}
 	log.Printf("%d likes to delete\n", len(ids))

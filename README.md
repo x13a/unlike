@@ -32,7 +32,7 @@ Usage of unlike:
 
 To unlike:
 ```sh
-$ unlike -u "<USERNAME>"
+$ unlike
 ```
 
 ## Friends
