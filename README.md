@@ -32,6 +32,7 @@ Usage of unlike:
 
 To unlike:
 ```sh
+$ source ./config/unlike.env
 $ unlike
 ```
 
